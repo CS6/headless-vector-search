@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>向量搜尋介面範例</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 30px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 30px;
+    }
+    .search-box {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 6px;
+      font-size: 16px;
+    }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+    button {
+      padding: 12px 24px;
+      background-color: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button:hover {
+      background-color: #2563eb;
+    }
+    button:disabled {
+      background-color: #9ca3af;
+      cursor: not-allowed;
+    }
+    .answer-container {
+      margin-top: 20px;
+      padding: 20px;
+      background-color: #f9fafb;
+      border-radius: 6px;
+      min-height: 100px;
+    }
+    .answer {
+      line-height: 1.6;
+      color: #333;
+      white-space: pre-wrap;
+    }
+    .loading {
+      color: #6b7280;
+      font-style: italic;
+    }
+    .error {
+      color: #dc2626;
+      padding: 10px;
+      background-color: #fee2e2;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+    .config-section {
+      background-color: #eff6ff;
+      padding: 15px;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    .config-section input {
+      width: 100%;
+      padding: 8px;
+      margin-top: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 向量搜尋介面</h1>
+    
+    <div class="config-section">
+      <label>
+        <strong>Supabase 專案 URL：</strong>
+        <input 
+          type="text" 
+          id="projectUrl" 
+          placeholder="https://your-project-ref.supabase.co"
+          value=""
+        />
+        <small>請填入您的 Supabase 專案 URL（不含尾部的斜線）</small>
+      </label>
+      <label style="margin-top: 15px; display: block;">
+        <strong>Supabase Anon Key（可選）：</strong>
+        <input 
+          type="password" 
+          id="anonKey" 
+          placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+          value=""
+        />
+        <small>如果 Edge Function 需要認證，請填入 Anon Key。可在 Supabase Dashboard > Settings > API 找到</small>
+      </label>
+    </div>
+
+    <form id="searchForm" class="search-box">
+      <input 
+        type="text" 
+        id="queryInput" 
+        placeholder="輸入您的問題，例如：什麼是 Supabase？"
+        required
+      />
+      <button type="submit" id="submitBtn">搜尋</button>
+    </form>
+
+    <div id="answerContainer" class="answer-container" style="display: none;">
+      <div id="answer" class="answer"></div>
+    </div>
+
+    <div id="error" class="error" style="display: none;"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('searchForm');
+    const queryInput = document.getElementById('queryInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const answerContainer = document.getElementById('answerContainer');
+    const answerDiv = document.getElementById('answer');
+    const errorDiv = document.getElementById('error');
+    const projectUrlInput = document.getElementById('projectUrl');
+    const anonKeyInput = document.getElementById('anonKey');
+
+    // 從 localStorage 載入之前保存的設定
+    const savedUrl = localStorage.getItem('supabaseProjectUrl');
+    if (savedUrl) {
+      projectUrlInput.value = savedUrl;
+    }
+    const savedKey = localStorage.getItem('supabaseAnonKey');
+    if (savedKey) {
+      anonKeyInput.value = savedKey;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      // 隱藏錯誤訊息
+      errorDiv.style.display = 'none';
+      
+      // 取得專案 URL
+      const projectUrl = projectUrlInput.value.trim();
+      if (!projectUrl) {
+        showError('請先填入 Supabase 專案 URL');
+        return;
+      }
+
+      // 保存設定到 localStorage
+      localStorage.setItem('supabaseProjectUrl', projectUrl);
+      const anonKey = anonKeyInput.value.trim();
+      if (anonKey) {
+        localStorage.setItem('supabaseAnonKey', anonKey);
+      }
+
+      const query = queryInput.value.trim();
+      if (!query) {
+        showError('請輸入搜尋問題');
+        return;
+      }
+
+      // 重置答案區域
+      answerDiv.textContent = '';
+      answerContainer.style.display = 'block';
+      answerDiv.textContent = '思考中...';
+      answerDiv.className = 'answer loading';
+      
+      // 禁用表單
+      submitBtn.disabled = true;
+      queryInput.disabled = true;
+
+      // 構建 Edge Function URL
+      const functionUrl = `${projectUrl}/functions/v1/vector-search`;
+      const queryParams = new URLSearchParams({ query });
+      const fullUrl = `${functionUrl}?${queryParams.toString()}`;
+
+      try {
+        // 準備 headers（如果有提供 API key）
+        const headers = {
+          'Accept': 'text/event-stream',
+        };
+        
+        // 如果提供了 anon key，加入到 headers
+        if (anonKey) {
+          headers['apikey'] = anonKey;
+          headers['Authorization'] = `Bearer ${anonKey}`;
+        }
+
+        // 使用 Fetch API 來支援自定義 headers
+        const response = await fetch(fullUrl, {
+          method: 'GET',
+          headers: headers,
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+
+        // 檢查 Content-Type 是否為 SSE
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('text/event-stream')) {
+          // 如果不是 SSE，可能是錯誤訊息
+          const text = await response.text();
+          try {
+            const json = JSON.parse(text);
+            throw new Error(json.error || text);
+          } catch {
+            throw new Error(text || '未預期的回應格式');
+          }
+        }
+
+        // 移除載入狀態
+        answerDiv.className = 'answer';
+        answerDiv.textContent = '';
+
+        // 使用 ReadableStream 來處理 SSE 串流
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            enableForm();
+            break;
+          }
+
+          // 解碼資料並加入緩衝區
+          buffer += decoder.decode(value, { stream: true });
+          
+          // 處理完整的 SSE 訊息
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // 保留最後不完整的行
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6); // 移除 'data: ' 前綴
+              
+              // 檢查是否完成
+              if (data.trim() === '[DONE]') {
+                enableForm();
+                return;
+              }
+
+              try {
+                // 解析 OpenAI 回應
+                const completionResponse = JSON.parse(data);
+                
+                if (completionResponse.choices && completionResponse.choices[0]) {
+                  const text = completionResponse.choices[0].text || '';
+                  // 累加文字內容
+                  answerDiv.textContent += text;
+                }
+              } catch (parseError) {
+                // 如果解析失敗，可能是其他類型的訊息
+                console.log('無法解析的資料:', data);
+              }
+            }
+          }
+        }
+
+      } catch (error) {
+        console.error('連線錯誤:', error);
+        answerDiv.textContent = '';
+        let errorMessage = '連線發生錯誤';
+        
+        if (error.message) {
+          errorMessage += ': ' + error.message;
+        } else {
+          errorMessage += '，請檢查：\n1. 專案 URL 是否正確\n2. 網路連線是否正常\n3. Edge Function 是否需要 API key';
+        }
+        
+        showError(errorMessage);
+        enableForm();
+      }
+    });
+
+    function enableForm() {
+      submitBtn.disabled = false;
+      queryInput.disabled = false;
+    }
+
+    function showError(message) {
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
+
