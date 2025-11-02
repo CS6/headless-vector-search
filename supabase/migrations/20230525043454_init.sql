@@ -45,7 +45,7 @@ begin
     page_section.heading,
     page_section.content,
     (page_section.embedding <#> embedding) * -1 as similarity
-  from page_section
+  from docs.page_section
 
   -- We only care about sections that have a useful amount of content
   where length(page_section.content) >= min_content_length
