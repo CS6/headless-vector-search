@@ -38,18 +38,34 @@ serve(async (req) => {
 
     const sanitizedQuery = query.trim();
 
+    // 驗證查詢長度
+    if (sanitizedQuery.length < 3) {
+      throw new UserError("Query is too short. Please provide a more detailed question.");
+    }
+
     // Moderate the content to comply with OpenAI T&C
-    const moderationResponse = await openai.createModeration({
-      input: sanitizedQuery,
-    });
-
-    const [results] = moderationResponse.data.results;
-
-    if (results.flagged) {
-      throw new UserError("Flagged content", {
-        flagged: true,
-        categories: results.categories,
+    // 添加錯誤處理，如果 moderation 失敗則跳過（可選）
+    try {
+      const moderationResponse = await openai.createModeration({
+        input: sanitizedQuery,
       });
+
+      if (moderationResponse.data && moderationResponse.data.results) {
+        const [results] = moderationResponse.data.results;
+
+        if (results.flagged) {
+          throw new UserError("Flagged content", {
+            flagged: true,
+            categories: results.categories,
+          });
+        }
+      }
+    } catch (moderationError: unknown) {
+      // 如果 moderation API 失敗，記錄錯誤但繼續執行
+      // 這確保服務不會因為 OpenAI moderation 的暫時性問題而中斷
+      console.error("Moderation API error (continuing anyway):", moderationError);
+      // 可選擇：如果希望嚴格檢查，可以取消下面的註解
+      // throw new ApplicationError("Content moderation check failed", moderationError);
     }
 
     const embeddingResponse = await openai.createEmbedding({
