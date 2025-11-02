@@ -1,11 +1,11 @@
 import "xhr";
 import { serve } from "std/http/server.ts";
 import { createClient } from "@supabase/supabase-js";
-import { codeBlock, oneLine } from "commmon-tags";
 import GPT3Tokenizer from "gpt3-tokenizer";
 import { Configuration, CreateCompletionRequest, OpenAIApi } from "openai";
 import { ensureGetEnv } from "../_utils/env.ts";
 import { ApplicationError, UserError } from "../_utils/errors.ts";
+import { buildSearchPrompt } from "../_utils/prompt.ts";
 
 const OPENAI_API_KEY = ensureGetEnv("OPENAI_API_KEY");
 const SUPABASE_URL = ensureGetEnv("SUPABASE_URL");
@@ -122,23 +122,8 @@ serve(async (req) => {
       throw new UserError("No content was extracted from the documentation. Please try rephrasing your question.");
     }
 
-    const prompt = codeBlock`
-      ${oneLine`
-        You are a helpful AI assistant. Given the following sections from the documentation,
-        answer the question using only that information, outputted in markdown format.
-        If you are unsure and the answer is not explicitly written in the documentation, say
-        "Sorry, I don't know how to help with that."
-      `}
-
-      Context sections:
-      ${contextText}
-
-      Question: """
-      ${sanitizedQuery}
-      """
-
-      Answer as markdown (including related code snippets if available):
-    `;
+    // 使用獨立的 prompt 模組建立提示詞
+    const prompt = buildSearchPrompt(contextText, sanitizedQuery);
 
     const completionOptions: CreateCompletionRequest = {
       model: "gpt-3.5-turbo-instruct",
