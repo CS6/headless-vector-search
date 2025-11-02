@@ -75,7 +75,7 @@ serve(async (req) => {
 
     // 使用增強後的查詢來生成 embedding
     const embeddingResponse = await openai.createEmbedding({
-      model: "text-embedding-ada-002",
+      model: "text-embedding-3-small",
       input: enhancedQuery.replaceAll("\n", " "),
     });
 
