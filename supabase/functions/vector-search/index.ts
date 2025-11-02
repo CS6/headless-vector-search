@@ -6,6 +6,7 @@ import { Configuration, CreateCompletionRequest, OpenAIApi } from "openai";
 import { ensureGetEnv } from "../_utils/env.ts";
 import { ApplicationError, UserError } from "../_utils/errors.ts";
 import { buildSearchPrompt } from "../_utils/prompt.ts";
+import { enhanceQuery } from "../_utils/query-enhancer.ts";
 
 const OPENAI_API_KEY = ensureGetEnv("OPENAI_API_KEY");
 const SUPABASE_URL = ensureGetEnv("SUPABASE_URL");
@@ -39,9 +40,13 @@ serve(async (req) => {
     const sanitizedQuery = query.trim();
 
     // 驗證查詢長度
-    if (sanitizedQuery.length < 3) {
+    if (sanitizedQuery.length < 2) {
       throw new UserError("Query is too short. Please provide a more detailed question.");
     }
+
+    // 增強查詢以提高匹配率（例如：將中文數字轉換為阿拉伯數字）
+    const enhancedQuery = enhanceQuery(sanitizedQuery);
+    console.log(`Original query: "${sanitizedQuery}", Enhanced query: "${enhancedQuery}"`);
 
     // Moderate the content to comply with OpenAI T&C
     // 添加錯誤處理，如果 moderation 失敗則跳過（可選）
@@ -68,9 +73,10 @@ serve(async (req) => {
       // throw new ApplicationError("Content moderation check failed", moderationError);
     }
 
+    // 使用增強後的查詢來生成 embedding
     const embeddingResponse = await openai.createEmbedding({
       model: "text-embedding-ada-002",
-      input: sanitizedQuery.replaceAll("\n", " "),
+      input: enhancedQuery.replaceAll("\n", " "),
     });
 
     if (embeddingResponse.status !== 200) {
@@ -82,18 +88,28 @@ serve(async (req) => {
 
     const [{ embedding }] = embeddingResponse.data.data;
 
+    // 先嘗試較低的閾值，如果找不到結果再降低
+    let matchThreshold = 0.3; // 降低閾值以提高匹配率（特別是針對數字查詢）
+    let matchCount = 15; // 增加匹配數量以便有更多候選
+
     const { error: matchError, data: pageSections } = await supabaseClient.rpc(
       "match_page_sections",
       {
         embedding,
-        match_threshold: 0.5, // 降低閾值以便找到更多相關內容
-        match_count: 10,
-        min_content_length: 50,
+        match_threshold: matchThreshold,
+        match_count: matchCount,
+        min_content_length: 20, // 降低最小內容長度以包含更多結果
       }
     );
 
     if (matchError) {
       throw new ApplicationError("Failed to match page sections", matchError);
+    }
+
+    // 記錄匹配結果以便調試
+    console.log(`Found ${pageSections?.length || 0} matching sections`);
+    if (pageSections && pageSections.length > 0) {
+      console.log(`Top match similarity: ${pageSections[0]?.similarity}`);
     }
 
     // 檢查是否找到匹配的內容
