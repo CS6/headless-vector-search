@@ -14,5 +14,5 @@ jobs:
           supabase-url: 'https://your-project-ref.supabase.co'
           supabase-service-role-key: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           openai-key: ${{ secrets.OPENAI_KEY }}
-          embedding-model: 'text-embedding-3-large' # optional; defaults to text-embedding-ada-002
+          embedding-model: 'text-embedding-3-small' # optional; defaults to text-embedding-ada-002
           docs-root-path: 'docs' # the path to the root of your md(x) files
