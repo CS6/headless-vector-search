@@ -88,9 +88,28 @@ serve(async (req) => {
 
     const [{ embedding }] = embeddingResponse.data.data;
 
-    // 先嘗試較低的閾值，如果找不到結果再降低
-    let matchThreshold = 0.3; // 降低閾值以提高匹配率（特別是針對數字查詢）
-    let matchCount = 15; // 增加匹配數量以便有更多候選
+    // 先檢查資料庫中是否有資料
+    const { count: totalSections, error: countError } = await supabaseClient
+      .from("page_section")
+      .select("*", { count: "exact", head: true });
+
+    if (countError) {
+      console.error("Error checking database:", countError);
+    } else {
+      console.log(`Total sections in database: ${totalSections || 0}`);
+    }
+
+    // 如果資料庫為空，返回明確的錯誤訊息
+    if (totalSections === 0) {
+      throw new UserError(
+        "資料庫中還沒有文檔內容。請先執行 GitHub Action 或手動匯入文檔來生成 embeddings。",
+        { totalSections: 0 }
+      );
+    }
+
+    // 嘗試多個閾值，從高到低，找到最合適的結果
+    let matchThreshold = 0.2; // 進一步降低閾值
+    let matchCount = 20; // 增加匹配數量
 
     const { error: matchError, data: pageSections } = await supabaseClient.rpc(
       "match_page_sections",
@@ -98,23 +117,45 @@ serve(async (req) => {
         embedding,
         match_threshold: matchThreshold,
         match_count: matchCount,
-        min_content_length: 20, // 降低最小內容長度以包含更多結果
+        min_content_length: 10, // 進一步降低最小內容長度
       }
     );
 
     if (matchError) {
+      console.error("Match error:", matchError);
       throw new ApplicationError("Failed to match page sections", matchError);
     }
 
     // 記錄匹配結果以便調試
-    console.log(`Found ${pageSections?.length || 0} matching sections`);
+    console.log(`Found ${pageSections?.length || 0} matching sections (threshold: ${matchThreshold})`);
     if (pageSections && pageSections.length > 0) {
       console.log(`Top match similarity: ${pageSections[0]?.similarity}`);
+      console.log(`Top match content preview: ${pageSections[0]?.content?.substring(0, 100)}...`);
+    } else {
+      // 如果沒有結果，嘗試查詢資料庫中的樣本資料來調試
+      const { data: sampleSections } = await supabaseClient
+        .from("page_section")
+        .select("id, content, heading")
+        .limit(3);
+      
+      if (sampleSections && sampleSections.length > 0) {
+        console.log(`Sample sections in database:`, sampleSections.map(s => ({
+          id: s.id,
+          heading: s.heading,
+          contentLength: s.content?.length || 0
+        })));
+      }
     }
 
     // 檢查是否找到匹配的內容
     if (!pageSections || pageSections.length === 0) {
-      throw new UserError("No relevant content found in the documentation. Please try rephrasing your question or check if the documentation has been ingested.");
+      throw new UserError(
+        `找不到相關內容。資料庫中有 ${totalSections || 0} 個內容區塊，但相似度都低於 ${matchThreshold}。請嘗試：\n1. 檢查 GitHub Action 是否成功執行\n2. 使用更具體的查詢關鍵字\n3. 確認文檔已正確匯入資料庫`,
+        { 
+          totalSections: totalSections || 0,
+          threshold: matchThreshold
+        }
+      );
     }
 
     const tokenizer = new GPT3Tokenizer({ type: "gpt3" });
