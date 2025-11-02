@@ -70,7 +70,7 @@ serve(async (req) => {
       "match_page_sections",
       {
         embedding,
-        match_threshold: 0.78,
+        match_threshold: 0.5, // 降低閾值以便找到更多相關內容
         match_count: 10,
         min_content_length: 50,
       }
@@ -78,6 +78,11 @@ serve(async (req) => {
 
     if (matchError) {
       throw new ApplicationError("Failed to match page sections", matchError);
+    }
+
+    // 檢查是否找到匹配的內容
+    if (!pageSections || pageSections.length === 0) {
+      throw new UserError("No relevant content found in the documentation. Please try rephrasing your question or check if the documentation has been ingested.");
     }
 
     const tokenizer = new GPT3Tokenizer({ type: "gpt3" });
@@ -96,13 +101,16 @@ serve(async (req) => {
       contextText += `${content.trim()}\n---\n`;
     }
 
+    // 如果沒有 context，返回錯誤
+    if (!contextText.trim()) {
+      throw new UserError("No content was extracted from the documentation. Please try rephrasing your question.");
+    }
+
     const prompt = codeBlock`
       ${oneLine`
-        You are a very enthusiastic Supabase representative who loves
-        to help people! Given the following sections from the Supabase
-        documentation, answer the question using only that information,
-        outputted in markdown format. If you are unsure and the answer
-        is not explicitly written in the documentation, say
+        You are a helpful AI assistant. Given the following sections from the documentation,
+        answer the question using only that information, outputted in markdown format.
+        If you are unsure and the answer is not explicitly written in the documentation, say
         "Sorry, I don't know how to help with that."
       `}
 
